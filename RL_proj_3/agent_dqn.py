@@ -12,7 +12,7 @@ import time
 
 
 import torch
-import torch.nn.functional as F
+import torch.nn as nn
 import torch.optim as optim
 import torchvision.transforms as T
 
@@ -23,22 +23,24 @@ you can import any package and define any extra function as you need
 """
 #Hyper parameters for training
 
-REPLAY_SIZE = 100000
+REPLAY_SIZE = 1000000
 
 GAMMA = 0.99
 BATCH_SIZE = 32
         
-LEARNING_RATE = 1e-4
-TARGET_UPDATE_INTERVAL = 1000
-LEARNING_STARTS = 10000
+LEARNING_RATE = 1e-5
+TARGET_UPDATE_INTERVAL = 10000
+LEARNING_STARTS = 5000
 SAVE_INTERVAL = 200
 
-DEVICE = 'gpu'
+DEVICE = 'cuda'
 
-EPSILON_DECAY = 10**4
+EPSILON_DECAY = 5000
 EPSILON_START = 1.0
 EPSILON_END   = 0.02
         
+LOAD_MODEL = False
+MODEL = "breakoutNoFrameSkip.dat"
 
 Experience = collections.namedtuple('Experience', field_names=['state', 'action', 'reward', 'done', 'new_state'])
 
@@ -68,9 +70,9 @@ class Agent_DQN(Agent):
         
         if args.test_dqn:
             #you can load your model here
-            print('loading trained model')
+            print('preparing to load trained model')
             ###########################
-            # YOUR IMPLEMENTATION HERE #
+            LOAD_MODEL = True
             
 
     def init_game_setting(self):
@@ -105,7 +107,7 @@ class Agent_DQN(Agent):
         states, actions, rewards, dones, next_states = zip(*[self.buffer[idx] for idx in indices])
         ########################### 
         # The 'states' below are already in the transposed form because they are sampled from experience
-        return np.array(states), np.array(actions), np.array(rewards, dtype=np.float32), np.array(dones, dtype=np.uint8), np.array(next_states)
+        return np.array(states), np.array(actions), np.array(rewards, dtype=np.float32), np.array(dones, dtype=np.bool), np.array(next_states)
 
 
     def _reset(self):
@@ -113,7 +115,7 @@ class Agent_DQN(Agent):
         self.total_reward = 0.0
     
 
-    def make_action(self, net, epsilon=0.0, device='gpu'):
+    def make_action(self, net, epsilon=0.0, device='cuda'):
         """
         select action
         """
@@ -132,7 +134,7 @@ class Agent_DQN(Agent):
         ###########################
         return action
 
-    def play_step(self, net, epsilon=0.0, device='gpu'):
+    def play_step(self, net, epsilon=0.0, device='cuda'):
 
         """
         execute action and take a step in the environment
@@ -151,7 +153,7 @@ class Agent_DQN(Agent):
         # But whatever state goes into experience will be in the form of depth X height X width
         # i.e the experience buffer will have state in the transposed format
         # because this is the format that pytorch input should look like
-        exp = Experience(self.state.transpose(2,0,1), action_for_exp, reward, is_done, new_state)
+        exp = Experience(self.state.transpose(2,0,1), action_for_exp, reward, is_done, new_state.transpose(2,0,1))
 
         #adding experiences in our replay memory
         self.push(exp)
@@ -163,16 +165,15 @@ class Agent_DQN(Agent):
         return done_reward
 
 
-    def loss_function(batch, net, target_net, device="gpu"):
+    def loss_function(self, batch, net, target_net, device="gpu"):
 
-        states, actions, rewards, dones, new_states = batch
+        states, actions, rewards, dones, next_states = batch
 
-        state_v = torch.tensor(states).to(device)
-        print(state_v.shape)
-        next_states_v = torch.tensor(next_states_v).to(device)
+        states_v = torch.tensor(states).to(device)
+        next_states_v = torch.tensor(next_states).to(device)
         actions_v = torch.tensor(actions).to(device)
         rewards_v = torch.tensor(rewards).to(device)
-        done = torch.ByteTensor(dones).to(device)
+        done = torch.BoolTensor(dones).to(device)
 
         state_action_values =net(states_v).gather(1, actions_v.long().unsqueeze(-1)).squeeze(-1)
         next_state_values  = target_net(next_states_v).max(1)[0]
@@ -192,7 +193,7 @@ class Agent_DQN(Agent):
         Implement your training algorithm here
         """
         ###########################
-        device = torch.device("gpu")
+        device = torch.device("cuda")
 
         net = DQN((4, 84, 84), self.env.action_space.n).to(device)
         target_net = DQN((4, 84, 84), self.env.action_space.n).to(device)
@@ -209,12 +210,17 @@ class Agent_DQN(Agent):
         frame_idx = 0
         timestep_frame = 0
         timestep = time.time()
-
+        
+        if LOAD_MODEL:
+            net.load_state_dict(torch.load(MODEL, map_location=lambda strorage, loc: storage))
+            print('loaded trained model')
+            target_net.load_state_dict(net.state_dict())
+            
 
         while True:
 
             frame_idx += 1
-            epsilon = max(EPSILON_END, ((EPSILON_START-frame_idx)/EPSILON_DECAY))
+            epsilon = max(EPSILON_END, EPSILON_START-frame_idx/EPSILON_DECAY)
 
             reward = self.play_step(net, epsilon, device=device)
 
@@ -238,8 +244,8 @@ class Agent_DQN(Agent):
                         print("New best mean reward {} -> {}, model saved".format(round(best_mean_reward, 3), round(mean_reward, 3)))
 
 
-            if frame_idx % SAVE_INTERVAL == 0
-                torch.save(net.state_dict(), "breakoutNoFrameSkip"  + ".dat")
+            if frame_idx % SAVE_INTERVAL == 0:
+                torch.save(net.state_dict(), "breakoutNoFrameSkip" + "-" +" str(len(total_rewards))" + ".dat")
 
             #checking the replay memory
             if len(self.buffer) < LEARNING_STARTS:
@@ -254,9 +260,12 @@ class Agent_DQN(Agent):
 
             optimizer.zero_grad()
             # sampling a batch from buffer
-            batch = replay_buffer(BATCH_SIZE)
-            loss_t = loss_function(batch, net, target_net, device= device)
-            print(loss_t)
+            batch = self.replay_buffer(BATCH_SIZE)
+            loss_t = self.loss_function(batch, net, target_net, device)
+            #printing loss at every 100 episodes
+            if len(total_rewards) % 100  == 0:
+                print("loss at episode"+str(len(total_rewards))+"is")
+                print(loss_t.data)
             loss_t.backward()
             optimizer.step()
 

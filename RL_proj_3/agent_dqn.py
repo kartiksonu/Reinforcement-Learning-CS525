@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-import random
+import math, random
 import numpy as np
 import collections
 from collections import deque
 import os
 import sys
-
 import time
-
-
 
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import torchvision.transforms as T
+import torch.nn.functional as F
+import torch.autograd as autograd 
+
 
 from agent import Agent
 from dqn_model import DQN
@@ -37,6 +37,7 @@ LEARNING_STARTS = 5000
 SAVE_INTERVAL = 1000
 
 DEVICE = 'cuda'
+USE_CUDA = torch.cuda.is_available()
 
 EPSILON_DECAY = 80000
 EPSILON_START = 1.0
@@ -44,6 +45,9 @@ EPSILON_END   = 0.02
         
 LOAD_MODEL = True
 MODEL = "breakoutNoFrameSkip.dat"
+
+
+Variable = lambda *args, **kwargs: autograd.Variable(*args, **kwargs).cuda() if USE_CUDA else autograd.Variable(*args, **kwargs)
 
 Experience = collections.namedtuple('Experience', field_names=['state', 'action', 'reward', 'done', 'new_state'])
 
@@ -119,7 +123,7 @@ class Agent_DQN(Agent):
         states, actions, rewards, dones, next_states = zip(*[self.buffer[idx] for idx in indices])
         ########################### 
         # The 'states' below are already in the transposed form because they are sampled from experience
-        return np.array(states), np.array(actions), np.array(rewards, dtype=np.float32), np.array(dones, dtype=np.bool), np.array(next_states)
+        return np.array(states, dtype=np.float32), np.array(actions), np.array(rewards, dtype=np.float32), np.array(dones, dtype=np.bool), np.array(next_states)
 
 
     def _reset(self):
@@ -133,37 +137,46 @@ class Agent_DQN(Agent):
         this is exclusively for testing our actions
         select action
         """
-        state_a_test = np.array([observation.transpose(2,0,1)], copy=False)
+        state_a_test     = np.array([observation.transpose(2,0,1)], copy=False)
         #torch.tensor opperation appends a '1' at the start of the numpy array
-        state_v_test = torch.tensor(state_a_test).to(DEVICE)
-        Q_values_v_test = self.net(state_v_test)
-        _, action_v_test = torch.max(Q_values_v_test, dim=1)
-        action_test = int(action_v_test.item())
-
+        state_v = Variable(torch.tensor(state_a).to(device))
+        #feeding observation to the network
+        Q_values_v = self.net.forward(state_v)
+        # picking the action with maximum probability
+            #picking the best action
+        _, action_v = torch.max(Q_values_v, dim=1)
+        #coverting tensor to int
+        action = int(action_v.item())
         ###########################
         return action_test
     
 
     def make_action_train(self, net, epsilon=0.0, device=DEVICE):
         """
-        select action for training purposes
+        select action using epsilon greedy method for training purposes
         """
         
         if np.random.random() < self.epsilon:
-            action = self.env.action_space.sample()
+            action = random.randrange(self.env.action_space.n)
 
         else:
             state_a = np.array([self.state.transpose(2,0,1)], copy=False)
             #torch.tensor opperation appends a '1' at the start of the numpy array
-            state_v = torch.tensor(state_a).to(device)
-            Q_values_v = self.net(state_v)
+            # and makes it a tensor to be fed to the net
+            state_v = Variable(torch.FloatTensor(state_a).to(device))
+            
+            #Q_values_v = self.net(state_v)
+            Q_values_v = self.net.forward(state_v)
+
+            #picking the best action
             _, action_v = torch.max(Q_values_v, dim=1)
+            #coverting tensor to int
             action = int(action_v.item())
 
         ###########################
         return action
 
-    def play_step(self, net, epsilon=0.0, device=DEVICE):
+    def take_a_step(self, net, epsilon=0.0, device=DEVICE):
 
         """
         execute action and take a step in the environment
@@ -171,11 +184,16 @@ class Agent_DQN(Agent):
         return the total_reward
         """
         done_reward = None
+
         action_for_exp = self.make_action_train(self.net, self.epsilon, DEVICE)
 
+
         new_state, reward, is_done, _ = self.env.step(action_for_exp)
+
+        #Here total reward is the reward for each episode
         self.total_reward += reward
         new_state = new_state
+
         #remember that the state that comes in from taking a step in our environment
         # will be in the form of width X height X depth
 
@@ -194,24 +212,35 @@ class Agent_DQN(Agent):
         return done_reward
 
 
-    def loss_function(self, batch, net, target_net, device=DEVICE):
+    def loss_function(self, batch, net, target_net, optimizer, device=DEVICE):
 
         states, actions, rewards, dones, next_states = batch
 
-        states_v = torch.tensor(states).to(device)
-        next_states_v = torch.tensor(next_states).to(device)
-        actions_v = torch.tensor(actions).to(device)
-        rewards_v = torch.tensor(rewards).to(device)
-        done = torch.BoolTensor(dones).to(device)
+        states_v      = Variable(torch.FloatTensor(states).to(device))
+        next_states_v = Variable(torch.FloatTensor(next_states).to(device))
+        actions_v     = Variable(torch.LongTensor(actions).to(device))
+        rewards_v     = Variable(torch.FloatTensor(rewards).to(device))
+        done          = Variable(torch.FloatTensor(dones).to(device))
 
+        #Q_vals
         state_action_values =self.net(states_v).gather(1, actions_v.long().unsqueeze(-1)).squeeze(-1)
+
+        #next_Q_vals
         next_state_values  = self.target_net(next_states_v).max(1)[0]
-        next_state_values[done] = 0.0
-        next_state_values = next_state_values.detach()
 
-        expected_state_action_values = next_state_values*GAMMA +rewards_v
+        #next_state_values[done] = 0.0
+        #next_state_values = next_state_values.detach()
 
-        loss = nn.MSELoss()(state_action_values, expected_state_action_values)
+        expected_state_action_values = rewards_v + next_state_values*GAMMA*(1-done)
+
+        loss = (state_action_values - Variable(expected_state_action_values)).pow(2).mean()
+
+        # we dont wanna accumilate our gradients
+        # hence it is importent to make them zero at every iteration
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
 
         return loss
 
@@ -223,9 +252,6 @@ class Agent_DQN(Agent):
         """
         ###########################
         device = torch.device(DEVICE)
-        
-
-        self.epsilon = EPSILON_START
 
         #defining the optimizer for your neural network
         optimizer = optim.RMSprop(self.net.parameters(), lr=LEARNING_RATE)
@@ -241,9 +267,9 @@ class Agent_DQN(Agent):
         while True:
 
             frame_idx += 1
-            self.epsilon = max(EPSILON_END, EPSILON_START-frame_idx/EPSILON_DECAY)
+            self.epsilon = EPSILON_END + (EPSILON_START - EPSILON_END)*math.exp(-1.*frame_idx/EPSILON_DECAY)
 
-            reward = self.play_step(self.net, self.epsilon, device=device)
+            reward = self.take_a_step(self.net, self.epsilon, device=device)
 
             if reward is not None:
                 #appending rewards in an empty list of total_rewards
@@ -276,19 +302,16 @@ class Agent_DQN(Agent):
             if frame_idx % TARGET_UPDATE_INTERVAL == 0:
                 self.target_net.load_state_dict(self.net.state_dict())
 
-            # we dont wanna accumilate our gradients
-            # hence it is importent to make them zero at every iteration
-
-            optimizer.zero_grad()
             # sampling a batch from buffer
             batch = self.replay_buffer(BATCH_SIZE)
-            loss_t = self.loss_function(batch, self.net, self.target_net, device)
+            #calculate and backpropogate
+            loss_t = self.loss_function(batch, self.net, self.target_net, optimizer, device)
+
             #printing loss at every 100 episodes
             if len(total_rewards) % 100  == 0:
                 print("loss at episode"+str(len(total_rewards))+"is")
-                print(loss_t.data)
-            loss_t.backward()
-            optimizer.step()
+                print(loss_t.data[0])
+
 
         self.env.close()        
         ###########################

@@ -29,7 +29,8 @@ GAMMA = 0.99
 BATCH_SIZE = 32
         
 LEARNING_RATE = 1e-5
-TARGET_UPDATE_INTERVAL = 1000
+#every 10000 frames the target is upated
+TARGET_UPDATE_INTERVAL = 10000
 #learning starts after 5000 experiences are collected
 LEARNING_STARTS = 5000
 
@@ -42,8 +43,7 @@ USE_CUDA = torch.cuda.is_available()
 EPSILON_DECAY = 80000
 EPSILON_START = 1.0
 EPSILON_END   = 0.02
-        
-LOAD_MODEL = True
+
 MODEL = "breakoutNoFrameSkip.dat"
 
 
@@ -73,7 +73,7 @@ class Agent_DQN(Agent):
         self.last_action = 0
         self.net = DQN((4, 84, 84), self.env.action_space.n).to(DEVICE)
         self.target_net = DQN((4, 84, 84), self.env.action_space.n).to(DEVICE)
-        LOAD_MODEL = True
+        LOAD_MODEL = False
 
         
         if args.test_dqn:
@@ -310,7 +310,7 @@ class Agent_DQN(Agent):
             #printing loss at every 100 episodes
             if len(total_rewards) % 100  == 0:
                 print("loss at episode"+str(len(total_rewards))+"is")
-                print(loss_t.data[0])
+                print(float(loss_t.item()))
 
 
         self.env.close()        

@@ -7,7 +7,6 @@ from collections import deque
 import os
 import sys
 import time
-import csv
 
 import torch
 import torch.nn as nn
@@ -29,24 +28,23 @@ REPLAY_SIZE = 100000
 GAMMA = 0.99
 BATCH_SIZE = 32
         
-LEARNING_RATE = 1.5e-5
+LEARNING_RATE = 1e-5
 #every 10000 frames the target is upated
 TARGET_UPDATE_INTERVAL = 10000
-
 #learning starts after 5000 experiences are collected
-LEARNING_STARTS = 10000
+LEARNING_STARTS = 5000
 
 #save model for every 1000 episodes
-SAVE_INTERVAL = 10000
+SAVE_INTERVAL = 1000
 
-DEVICE = 'cuda'
+DEVICE = 'cpu'
 USE_CUDA = torch.cuda.is_available()
 
-EPSILON_DECAY = 100000
-EPSILON_START = 1
+EPSILON_DECAY = 90000
+EPSILON_START = 1.0
 EPSILON_END   = 0.02
 
-MODEL = "breakoutNoFrameSkip-4v1.dat"
+MODEL = "breakoutNoFrameSkip.dat"
 
 
 Variable = lambda *args, **kwargs: autograd.Variable(*args, **kwargs).cuda() if USE_CUDA else autograd.Variable(*args, **kwargs)
@@ -294,7 +292,7 @@ class Agent_DQN(Agent):
 
 
             if frame_idx % SAVE_INTERVAL == 0:
-                torch.save(self.net.state_dict(), 'breakoutNoFrameSkip-4v1'+'.dat')
+                torch.save(self.net.state_dict(), 'breakoutNoFrameSkip'+'.dat')
 
             #checking the replay memory
             if len(self.buffer) < LEARNING_STARTS:
@@ -311,11 +309,8 @@ class Agent_DQN(Agent):
 
             #printing loss at every 100 episodes
             if len(total_rewards) % 100  == 0:
-                print("loss at episode"+str(len(total_rewards))+"is"+str(float(loss_t.item())))
-
-            with open('rewards_collection.csv', mode='w') as dataFile:
-                writer = csv.writer(dataFile, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
-                writer.writerow(total_rewards)
+                print("loss at episode"+str(len(total_rewards))+"is")
+                print(float(loss_t.item()))
 
 
         self.env.close()        

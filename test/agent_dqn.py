@@ -37,14 +37,14 @@ LEARNING_STARTS = 5000
 #save model for every 1000 episodes
 SAVE_INTERVAL = 1000
 
-DEVICE = 'cpu'
+DEVICE = 'cuda'
 USE_CUDA = torch.cuda.is_available()
 
 EPSILON_DECAY = 90000
 EPSILON_START = 1.0
 EPSILON_END   = 0.02
 
-MODEL = "breakoutNoFrameSkip.dat"
+MODEL = "breakoutNoFrameSkip-4v1.dat"
 
 
 Variable = lambda *args, **kwargs: autograd.Variable(*args, **kwargs).cuda() if USE_CUDA else autograd.Variable(*args, **kwargs)
@@ -139,7 +139,7 @@ class Agent_DQN(Agent):
         """
         state_a_test     = np.array([observation.transpose(2,0,1)], copy=False)
         #torch.tensor opperation appends a '1' at the start of the numpy array
-        state_v_test = torch.tensor(state_a_test).to('cpu')
+        state_v_test = torch.tensor(state_a_test).to('cuda')
         #feeding observation to the network
         Q_values_v_test = self.net.forward(state_v_test)
         # picking the action with maximum probability

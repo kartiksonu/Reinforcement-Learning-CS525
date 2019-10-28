@@ -31,7 +31,7 @@ BATCH_SIZE = 32
         
 LEARNING_RATE = 1.5e-5
 #every 10000 frames the target is upated
-TARGET_UPDATE_INTERVAL = 10000
+TARGET_UPDATE_INTERVAL = 15000
 
 #learning starts after 5000 experiences are collected
 LEARNING_STARTS = 10000
@@ -43,7 +43,7 @@ DEVICE = 'cuda'
 USE_CUDA = torch.cuda.is_available()
 
 EPSILON_DECAY = 100000
-EPSILON_START = 1
+EPSILON_START = 0.04
 EPSILON_END   = 0.02
 
 MODEL = "breakoutNoFrameSkip-4v1.dat"
@@ -75,7 +75,7 @@ class Agent_DQN(Agent):
         self.last_action = 0
         self.net = DQN((4, 84, 84), self.env.action_space.n).to(DEVICE)
         self.target_net = DQN((4, 84, 84), self.env.action_space.n).to(DEVICE)
-        LOAD_MODEL = False
+        LOAD_MODEL = True
 
         
         if args.test_dqn:
@@ -282,8 +282,8 @@ class Agent_DQN(Agent):
                 timestep_frame = frame_idx
                 timestep = time.time()
 
-                #calculating mean of last(recent) 30 rewards
-                mean_reward = np.mean(total_rewards[-30:])
+                #calculating mean of last(recent) 1000 rewards
+                mean_reward = np.mean(total_rewards[-100:])
 
                 print("{} frames: done {} games, mean reward {}, epsilon {}, speed {} frames/s".format(frame_idx, len(total_rewards), round(mean_reward, 3), round(self.epsilon,2), round(speed, 2)))
 
@@ -313,7 +313,7 @@ class Agent_DQN(Agent):
             if len(total_rewards) % 100  == 0:
                 print("loss at episode"+str(len(total_rewards))+"is"+str(float(loss_t.item())))
 
-            with open('rewards_collection.csv', mode='w') as dataFile:
+            with open('rewards_collection-100mean.csv', mode='w') as dataFile:
                 writer = csv.writer(dataFile, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
                 writer.writerow(total_rewards)
 
